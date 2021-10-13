@@ -7,11 +7,11 @@ pkg load io;
 pkg load windows;
 
 %% SET PARAMETERS FOR TESTING ONLY!
-x_global = 10950;
-y_global = 9620;
-
-col_mm = 0;
+col_mm = 10950;
 row_mm = 9620;
+
+x_global = 0;
+y_global = 9620;
 
 file_name = "Antequera_Mesh_Model_BRTL_HGNSTD.xlsx";
 sheet_name = "Sheet1";
@@ -19,7 +19,7 @@ info_range_node = "E11:G46635";
 info_range_element = "J11:T7039";
 
 fct = 2.58;
-E_c = 2955.58;
+E_c = 29555.58;
 fc_c = 25.29;
 pr = 0.2;
 den  = 2000;
@@ -67,11 +67,11 @@ ratio = max(row_mm/row_px , col_mm/col_px);
 ## performance reasons.
 
 %% get x,y subscript locations of zero elements (i.e. black/crack)
-[crack_yidx, crack_xidx] = find(~B); 
+[crack_idx, crack_jdx] = find(~B); 
 
 %% get centroid of zero elements/pixel
-xq = x_global + ((crack_xidx - 0.5) * ratio); 
-yq = y_global + ((crack_yidx - 0.5) * ratio); 
+xq = x_global + ((crack_jdx - 0.5) * ratio); 
+yq = y_global - ((crack_idx - 0.5) * ratio); 
 
 
 % 2. ENTER EXPORTED DIANA MESH MODEL
@@ -90,28 +90,32 @@ info_range_element = answer{4};
 % Read Excel file
 if exist("Node_Coord.mat")
     load Node_Coord.mat Node_Coord
-    display("Nodes info successfully loaded!") 
+    display("Nodes info successfully loaded!"); 
 else
     Node_Coord = xlsread(file_name, sheet_name, info_range_node, "OCT");
     save Node_Coord.mat Node_Coord
-    display("Saving... Nodes info successfully read!") 
+    display("Saving... Nodes info successfully read!"); 
 end
  
 
 if exist("Elem_Type_Nodes.mat")
     load Elem_Type_Nodes.mat Elem_Type_Nodes
-    display("Nodes info successfully loaded!")    
+    display("Element info successfully loaded!");   
 else
     [Elem_Type_Nodes, xls, status] = xlsread(file_name, sheet_name, info_range_element, "OCT");
     save Elem_Type_Nodes.mat Elem_Type_Nodes
-    display("Saving... Element info successfully read!")
+    display("Saving... Element info successfully read!");
 end
 
 
 [row_nodes, col_nodes] = size(Node_Coord);
 [row_elem, col_elem] = size(Elem_Type_Nodes);
 
+xv = zeros(8);
+yv = zeros(8);
 Elem_Cracks = zeros(row_elem,2);
+
+% Get vertex node indices and corresponding coordinates
 % Loop for all elements
 for i = 1:row_elem
     % get non-zero vertex node indices;
@@ -123,10 +127,12 @@ for i = 1:row_elem
     [in,on] = inpolygon(xq,yq,xv,yv);
     Elem_Cracks(i,1) = Elem_Type_Nodes(i,1); % store element ID
     Elem_Cracks(i,2) = numel(xq(in))+ numel(xq(on)); % store crack node count
-    disp(["Processing Element ", num2str(i), "..."])
+    display(["Processing Element ", num2str(i), "..."]);
 end 
 
-diary Antequera_WEA_Mesh_data_BRTL_HGNSTD.out
+
+display("Writing to OUT file...");
+diary Antequera_WEA_Mesh_data_BRTL_HGNSTD.out;
 
 %TENSILE STRENGTH REDUCTION
 
@@ -149,31 +155,25 @@ diary Antequera_WEA_Mesh_data_BRTL_HGNSTD.out
 
 Elem_WEA_info = zeros(row_elem,7);
 
-for i = 1:row_elem
-        
-        w_c = Elem_Cracks(i,2)*ratio/h/1000;
-       
-        if  w_c > 0
-            status = 0; # "cracked"; overriden previous string assignment (VERIFY)
-            fct_c = 0.01;
- 
-        else
-            status = 1; # "uncracked"; overriden previous string assignment (VERIFY)
-            fct_c = fct;
-        end
-        
-        Elem_WEA_info(i,1) = Elem_Cracks(i,1);
-        Elem_WEA_info(i,2) = status;
-        Elem_WEA_info(i,3) = fct_c;
-end
+w_c = Elem_Cracks(:,2)*ratio/h/1000;
 
-    %%Obtaining unique material sets
+# 1 if "cracked" & 0 if "uncracked"
+crack_flag = w_c > 0; 
+fct_c(crack_flag) = 0.01; % tensile strength for weakened elements (cracked)
+fct_c(~crack_flag) = fct; % tensile strength for default concrete (uncracked)
 
-    Mat_sets = unique(Elem_WEA_info(:,3));
+Elem_WEA_info(:,1) = Elem_Cracks(:,1);
+Elem_WEA_info(:,2) = crack_flag;
+Elem_WEA_info(:,3) = fct_c;
+
+
+%%Obtaining unique material sets
+
+Mat_sets = unique(Elem_WEA_info(:,3));
     
-    [row_Mat_sets,col_Mat_sets] = size(Mat_sets);
+[row_Mat_sets,col_Mat_sets] = size(Mat_sets);
     
-    for i = 1: row_Mat_sets
+for i = 1: row_Mat_sets
           
     fprintf('   %d NAME   "%f"\n', i+2,Mat_sets(i,1));
     fprintf('     MCNAME CONCR\n');
@@ -198,7 +198,7 @@ end
     fprintf('     REDCRV NONE\n');
     fprintf('     CNFCRV NONE\n');
        
-    end
+end
     
 %%Create Element Set
 
