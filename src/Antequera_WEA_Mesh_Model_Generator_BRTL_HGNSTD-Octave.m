@@ -6,7 +6,27 @@ pkg load image;
 pkg load io;
 pkg load windows;
 
-%POINT IN POLYGON CHECK
+%% SET PARAMETERS FOR TESTING ONLY!
+x_global = 10950;
+y_global = 9620;
+
+col_mm = 0;
+row_mm = 9620;
+
+file_name = "Antequera_Mesh_Model_BRTL_HGNSTD.xlsx";
+sheet_name = "Sheet1";
+info_range_node = "E11:G46635";
+info_range_element = "J11:T7039";
+
+fct = 2.58;
+E_c = 2955.58;
+fc_c = 25.29;
+pr = 0.2;
+den  = 2000;
+h = 120;
+%% SET PARAMETERS FOR TESTING ONLY!
+
+% 1. POINT IN POLYGON CHECK
 
 %select image file
 [filename,path]=uigetfile({'*.png';'*.jpg'},'file selector');
@@ -17,12 +37,12 @@ B = im2bw(O,0.5);
 
 %%enter structure dimensions
 
-prompt = {'Enter the actual horizontal structure size in mm:','Enter the actual vertical structure size in mm:'};
-dlgtitle = 'Structure Dimensions';
-dims = [1 1]; %% height of each text field
-answer = inputdlg(prompt,dlgtitle,dims);
-col_mm = str2double(answer{1});
-row_mm = str2double(answer{2});
+##prompt = {'Enter the actual horizontal structure size in mm:','Enter the actual vertical structure size in mm:'};
+##dlgtitle = 'Structure Dimensions';
+##dims = [1 1]; %% height of each text field
+##answer = inputdlg(prompt,dlgtitle,dims);
+##col_mm = str2double(answer{1});
+##row_mm = str2double(answer{2});
 
 
 %%ratio of mm/px
@@ -34,12 +54,12 @@ ratio = max(row_mm/row_px , col_mm/col_px);
 
 %Coordinate Matching
 
-prompt = {'Enter x coordinate (mm) of the upper left corner of the structure:','Enter y coordinate (mm) of the upper left corner of the structure:'};
-dlgtitle = 'Coordinate Matching';
-dims = [1 1]; %% height of each text field
-answer = inputdlg(prompt,dlgtitle,dims);
-x_global = str2double(answer{1});
-y_global = str2double(answer{2});
+##prompt = {'Enter x coordinate (mm) of the upper left corner of the structure:','Enter y coordinate (mm) of the upper left corner of the structure:'};
+##dlgtitle = 'Coordinate Matching';
+##dims = [1 1]; %% height of each text field
+##answer = inputdlg(prompt,dlgtitle,dims);
+##x_global = str2double(answer{1});
+##y_global = str2double(answer{2});
 
 
 %Array of Coordinates for Crack Centroids
@@ -54,81 +74,56 @@ xq = x_global + ((crack_xidx - 0.5) * ratio);
 yq = y_global + ((crack_yidx - 0.5) * ratio); 
 
 
-%ENTER EXPORTED MESH MODEL
-
+% 2. ENTER EXPORTED DIANA MESH MODEL
+#{
 prompt = {'Enter file name of mesh information spreadsheet:','Enter sheet name:','Enter range for node coordinates:','Enter range for element type, nodes, and geometry:'};
 dlgtitle = 'Exported Mesh Information';
 dims = [1 1 1 1]; %% height of each text field
 answer = inputdlg(prompt,dlgtitle,dims);
+
 file_name = answer{1};
 sheet_name = answer{2};
 info_range_node = answer{3};
 info_range_element = answer{4};
-#{
-file_name = "Antequera_Mesh_Model_BRTL_HGNSTD.xlsx";
-sheet_name = "Sheet1";
-info_range_node = "E11:G46635";
-info_range_element = "J11:T7039";
 #}
 
-Node_Coord = xlsread(file_name, sheet_name, info_range_node, "oct");
-Elem_Type_Nodes = xlsread(file_name, sheet_name, info_range_element, "oct");
+% Read Excel file
+if exist("Node_Coord.mat")
+    load Node_Coord.mat Node_Coord
+    display("Nodes info successfully loaded!") 
+else
+    Node_Coord = xlsread(file_name, sheet_name, info_range_node, "OCT");
+    save Node_Coord.mat Node_Coord
+    display("Saving... Nodes info successfully read!") 
+end
+ 
+
+if exist("Elem_Type_Nodes.mat")
+    load Elem_Type_Nodes.mat Elem_Type_Nodes
+    display("Nodes info successfully loaded!")    
+else
+    [Elem_Type_Nodes, xls, status] = xlsread(file_name, sheet_name, info_range_element, "OCT");
+    save Elem_Type_Nodes.mat Elem_Type_Nodes
+    display("Saving... Element info successfully read!")
+end
 
 
 [row_nodes, col_nodes] = size(Node_Coord);
 [row_elem, col_elem] = size(Elem_Type_Nodes);
 
 Elem_Cracks = zeros(row_elem,2);
-    
-
+% Loop for all elements
 for i = 1:row_elem
-    
-    %For Hexa/Quad Mesh
-    if Elem_Type_Nodes(i,9) > 0 && Elem_Type_Nodes(i,10) > 0 
-        xv = zeros(8,1);
-        yv = zeros(8,1);
+    % get non-zero vertex node indices;
+    vrtx = nonzeros(Elem_Type_Nodes(i,3:10));
+    xv = Node_Coord(vrtx, 2);
+    yv = Node_Coord(vrtx, 3);
         
-        %Define vertices of the Element in the current iteration
-        for j = 1:8 
-            for k = 1:row_nodes
-                if Elem_Type_Nodes(i,j+2) == Node_Coord(k,1)
-                    xv(j,1) = Node_Coord(k,2);
-                    yv(j,1) = Node_Coord(k,3);
-
-                end
-            end
-        end
-        
-        %Count of crack centroids within each element
-        [in,on] = inpolygon(xq,yq,xv,yv);
-        Elem_Cracks(i,1)= Elem_Type_Nodes(i,1);
-        Elem_Cracks(i,2)= numel(xq(in))+ numel(xq(on));
-    
-    %For Tetra/Triangle Mesh
-    elseif Elem_Type_Nodes(i,9) == 0 && Elem_Type_Nodes(i,10) == 0
-        
-        xv = zeros(6,1);
-        yv = zeros(6,1);
-        
-        %Define vertices of the Element in the current iteration
-        for j = 1:6 
-            for k = 1:row_nodes
-                if Elem_Type_Nodes(i,j+2)== Node_Coord(k,1)
-                    xv(j,1) = Node_Coord(k,2);
-                    yv(j,1) = Node_Coord(k,3);
-
-                end
-            end
-        end
-        
-        %Count of crack centroids within each element
-        [in,on] = inpolygon(xq,yq,xv,yv);
-        Elem_Cracks(i,1)= Elem_Type_Nodes(i,1);
-        Elem_Cracks(i,2)= numel(xq(in))+ numel(xq(on));
-      
-    end
-    
-    
+    % Get crack centroids in and on each element i
+    [in,on] = inpolygon(xq,yq,xv,yv);
+    Elem_Cracks(i,1) = Elem_Type_Nodes(i,1); % store element ID
+    Elem_Cracks(i,2) = numel(xq(in))+ numel(xq(on)); % store crack node count
+    disp(["Processing Element ", num2str(i), "..."])
 end 
 
 diary Antequera_WEA_Mesh_data_BRTL_HGNSTD.out
@@ -137,25 +132,17 @@ diary Antequera_WEA_Mesh_data_BRTL_HGNSTD.out
 
 %%Insert Material Properties
 
-prompt = {'Tensile Strength (MPa):','Modulus of Elasticity (MPa)','Compressive Strength (MPa)','Poisson Ratio', 'Mass Density (kg/m3)', 'Element Size (mm)' };
-dlgtitle = 'Concrete Material Properties';
-dims = [1 1 1 1 1 1]; ## height of text field
-answer = inputdlg(prompt,dlgtitle,dims);
-fct = str2double(answer{1});
-E_c = str2double(answer{2});
-fc_c = str2double(answer{3});
-pr = str2double(answer{4});
-den  = str2double(answer{5});
-h = str2double(answer{6});
+##prompt = {'Tensile Strength (MPa):','Modulus of Elasticity (MPa)','Compressive Strength (MPa)','Poisson Ratio', 'Mass Density (kg/m3)', 'Element Size (mm)' };
+##dlgtitle = 'Concrete Material Properties';
+##dims = [1 1 1 1 1 1]; ## height of text field
+##answer = inputdlg(prompt,dlgtitle,dims);
+##fct = str2double(answer{1});
+##E_c = str2double(answer{2});
+##fc_c = str2double(answer{3});
+##pr = str2double(answer{4});
+##den  = str2double(answer{5});
+##h = str2double(answer{6});
 
-#{
-fct = 2.58;
-E_c = 2955.58;
-fc_c = 25.29;
-pr = 0.2;
-den  = 2000;
-h = 120;
-#}
 
 %%computing residual/reduced material properties per mesh 
 %%creating a array containing info per mesh
@@ -259,16 +246,12 @@ for i=1:Geom_set
                         fprintf('   %d CT30S  %d %d %d %d %d %d \n', Elem_Type_Nodes(k,1), Elem_Type_Nodes(k,3), Elem_Type_Nodes(k,4), Elem_Type_Nodes(k,5), Elem_Type_Nodes(k,6),Elem_Type_Nodes(k,7),Elem_Type_Nodes(k,8));
                     
                     end
-                    
                 end          
             end
-        
         
         fprintf('MATERIAL %d\n', j+2);
         fprintf('GEOMETRY %d\n',Geom (1,i))          
         end
-        
-
     end
 end
         
